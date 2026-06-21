@@ -89,7 +89,7 @@ def linkedin_people_search(company: str, title_hint: str = "recruiter"):
     return f"https://www.linkedin.com/search/results/people/?keywords={q}"
 
 
-def find_contacts(company: str, job_url: str = None, your_first: str = "Atharva", your_last: str = "Bhale"):
+def find_contacts(company: str, job_url: str = None, your_first: str = "", your_last: str = ""):
     domain = _clean_domain(company, job_url)
     contacts = []
 

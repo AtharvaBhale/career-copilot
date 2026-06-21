@@ -24,6 +24,7 @@ import requests
 from db import get_connection, now
 import memory
 import llm
+import profile
 
 # Phrases that usually block OPT / international candidates.
 OPT_BLOCK_PATTERNS = [
@@ -58,27 +59,56 @@ TARGET_ROLE_KEYWORDS = [
 ]
 
 
-def _parse_date(value: str):
+def _parse_date(value):
+    """Parse API date fields that may be str, int (unix), or missing."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+            if ts > 1e12:  # milliseconds
+                ts /= 1000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            return None
+    if not isinstance(value, str):
+        value = str(value)
+    value = value.strip()
     if not value:
         return None
-    for fmt in (
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
+    if value.isdigit():
+        return _parse_date(int(value))
+
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+
+    for fmt, length in (
+        ("%Y-%m-%dT%H:%M:%S", 19),
+        ("%Y-%m-%d %H:%M:%S", 19),
+        ("%Y-%m-%d", 10),
     ):
         try:
-            dt = datetime.strptime(value[:19], fmt[: len(value[:19])])
-            return dt.replace(tzinfo=timezone.utc)
+            return datetime.strptime(value[:length], fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return None
 
 
-def _is_fresh(posted_at: str, max_age_days: int = 1):
+def _posted_at_label(value):
+    dt = _parse_date(value)
+    if dt:
+        return dt.strftime("%Y-%m-%d")
+    if value is not None:
+        return str(value)[:10]
+    return "unknown"
+
+
+def _is_fresh(posted_at, max_age_days: int = 1):
     dt = _parse_date(posted_at)
     if dt is None:
         return True  # unknown date: keep but rank lower
@@ -229,7 +259,9 @@ def fetch_all_sources():
 def _profile_summary():
     items = memory.all_active_items()
     bullets = [i["content"] for i in items if i["item_type"] in ("bullet", "project", "skill", "summary")]
-    return "\n".join(f"- {b}" for b in bullets[:25])
+    header = profile.profile_summary_for_llm()
+    body = "\n".join(f"- {b}" for b in bullets[:25])
+    return f"{header}\n\nBackground:\n{body}"
 
 
 def discover_jobs(max_age_days: int = 1, score_with_llm: bool = True, limit: int = 30):
@@ -254,9 +286,14 @@ def discover_jobs(max_age_days: int = 1, score_with_llm: bool = True, limit: int
         role_score = _role_relevance(job.get("title") or "", job["description"])
         match = {"match_score": role_score, "interview_likelihood": None, "recommendation": "maybe", "recommendation_reason": "Role keyword match only."}
 
-        if score_with_llm and role_score >= 30:
+        if score_with_llm and role_score >= 30 and profile.strip():
             jd_blob = f"{job.get('title')}\n{job.get('company')}\n{job['description'][:4000]}"
-            match = llm.score_job_match(jd_blob, profile)
+            try:
+                match = llm.score_job_match(jd_blob, profile)
+            except RuntimeError:
+                match["recommendation_reason"] = "LLM scoring skipped (GROQ_API_KEY not set)."
+        elif score_with_llm and not profile.strip():
+            match["recommendation_reason"] = "Add career items on the Memory page for LLM scoring."
 
         cur.execute(
             """INSERT INTO discovered_jobs
@@ -278,7 +315,7 @@ def discover_jobs(max_age_days: int = 1, score_with_llm: bool = True, limit: int
                 job.get("location"),
                 job.get("url"),
                 job["description"],
-                job.get("posted_at"),
+                _posted_at_label(job.get("posted_at")) if job.get("posted_at") is not None else None,
                 now(),
                 1 if opt_ok else 0,
                 json.dumps(opt_flags),

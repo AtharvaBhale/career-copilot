@@ -170,6 +170,21 @@ CREATE TABLE IF NOT EXISTS interview_prep (
     updated_at TEXT NOT NULL
 );
 
+-- Single-user profile (one row, id=1). Personalizes resume, outreach, job scoring.
+CREATE TABLE IF NOT EXISTS user_profile (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT,
+    phone TEXT,
+    location TEXT,
+    linkedin_url TEXT,
+    target_roles TEXT,              -- JSON list
+    work_auth_summary TEXT,
+    updated_at TEXT NOT NULL
+);
+
 -- Cold outreach drafts linked to a job.
 CREATE TABLE IF NOT EXISTS outreach_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

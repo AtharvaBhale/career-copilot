@@ -38,8 +38,11 @@ import memory
 import pipeline
 import job_discovery
 import outreach
+import profile
 
 db.init_db()
+
+GROQ_CONFIGURED = bool(os.environ.get("GROQ_API_KEY"))
 
 
 def do_backup():
@@ -55,10 +58,24 @@ st.caption("OPT job search automation · UConn MSDS · STEM OPT eligible Feb 202
 if st.session_state.get("restore_message"):
     st.caption(st.session_state["restore_message"])
 
+if not GROQ_CONFIGURED:
+    st.error(
+        "**GROQ_API_KEY is missing.** Resume, cover letter, and LLM job scoring will not work. "
+        "Add it in Streamlit Cloud: **Manage app → Settings → Secrets**, then reboot the app."
+    )
+
+memory_count = len(memory.all_active_items())
+if memory_count == 0:
+    st.warning(
+        "**Setup needed:** Your career memory is empty. Go to **Profile** to save your details, "
+        "then **Memory** to add resume bullets (or run `seed_from_resume.py` locally once)."
+    )
+
 page = st.sidebar.radio(
     "Navigate",
     [
         "Dashboard",
+        "Profile",
         "Discover Jobs",
         "Generate",
         "Outreach",
@@ -115,6 +132,54 @@ if page == "Dashboard":
     g2.metric("Target outreach", "5/week", help="Cold emails or LinkedIn messages")
     g3.metric("Target networking", "3/week", help="Coffee chats, alumni calls")
 
+# ------------------------------------------------------------------- Profile
+elif page == "Profile":
+    st.header("Your profile")
+    st.caption(
+        "Personalizes resumes, cover letters, outreach, and job scoring. "
+        "This app is **single-user** today (one SQLite file). "
+        "Multi-user support later needs login + separate data per user."
+    )
+
+    p = profile.get_profile()
+    c1, c2 = st.columns(2)
+    with c1:
+        full_name = st.text_input("Full name", value=p.get("full_name") or "")
+        first_name = st.text_input("First name", value=p.get("first_name") or "")
+        last_name = st.text_input("Last name", value=p.get("last_name") or "")
+        email = st.text_input("Email", value=p.get("email") or "")
+    with c2:
+        phone = st.text_input("Phone", value=p.get("phone") or "")
+        location = st.text_input("Location", value=p.get("location") or "")
+        linkedin = st.text_input("LinkedIn URL", value=p.get("linkedin_url") or "")
+
+    target_roles = st.text_input(
+        "Target roles (comma separated)",
+        value=", ".join(p.get("target_roles") or []),
+    )
+    work_auth = st.text_area(
+        "Work authorization summary (used in cover letters & outreach)",
+        value=p.get("work_auth_summary") or "",
+        height=100,
+    )
+
+    if st.button("Save profile", type="primary"):
+        roles = [r.strip() for r in target_roles.split(",") if r.strip()]
+        profile.save_profile(
+            full_name, first_name, last_name, email, phone, location, linkedin, roles, work_auth
+        )
+        do_backup()
+        st.success("Profile saved.")
+
+    st.divider()
+    st.subheader("Quick setup")
+    st.markdown("""
+1. **Save profile** above (name, OPT/STEM OPT wording, target roles).
+2. Go to **Memory** and add resume bullets, projects, skills.
+3. Go to **Preferences** and click **Load suggested OPT preferences**.
+4. Optional: add `GROQ_API_KEY` in Streamlit Secrets for AI features.
+    """)
+
 # ----------------------------------------------------------- Discover Jobs
 elif page == "Discover Jobs":
     st.header("Discover fresh OPT-friendly openings")
@@ -134,9 +199,12 @@ elif page == "Discover Jobs":
 
     if st.button("Fetch fresh jobs", type="primary"):
         with st.spinner("Fetching and scoring jobs..."):
-            job_discovery.discover_jobs(max_age_days=max_age, score_with_llm=use_llm)
-            do_backup()
-        st.success("Job feed updated.")
+            try:
+                job_discovery.discover_jobs(max_age_days=max_age, score_with_llm=use_llm)
+                do_backup()
+                st.success("Job feed updated.")
+            except Exception as exc:
+                st.error(f"Job fetch failed: {exc}")
 
     jobs = job_discovery.list_discovered_jobs(
         recommendation=None if rec_filter == "all" else rec_filter,
@@ -151,7 +219,7 @@ elif page == "Discover Jobs":
             badge = {"apply": "🟢 Apply", "maybe": "🟡 Maybe", "skip": "🔴 Skip"}.get(rec, rec)
             with st.expander(f"{badge} · {job['title']} at {job['company']} · match {job.get('match_score', 'n/a')}"):
                 st.write(f"**Source:** {job['source']} · **Location:** {job['location']}")
-                st.write(f"**Posted:** {job.get('posted_at', 'unknown')[:10] if job.get('posted_at') else 'unknown'}")
+                st.write(f"**Posted:** {job_discovery._posted_at_label(job.get('posted_at'))}")
                 if job.get("url"):
                     st.markdown(f"[View posting]({job['url']})")
                 st.write(job.get("recommendation_reason") or "")
@@ -215,7 +283,9 @@ elif page == "Generate":
     )
 
     if st.button("Generate tailored resume + cover letter", type="primary"):
-        if not jd_text.strip():
+        if not GROQ_CONFIGURED:
+            st.error("Add GROQ_API_KEY in Streamlit Secrets first.")
+        elif not jd_text.strip():
             st.error("Paste a job description first.")
         else:
             with st.spinner("Parsing job description..."):
@@ -313,11 +383,17 @@ elif page == "Outreach":
         conn.close()
 
         company = jd_row["company"] or "Unknown"
+        user_p = profile.get_profile()
         contact_first = st.text_input("Contact first name (optional)", "")
         contact_last = st.text_input("Contact last name (optional)", "")
 
         if st.button("Find contacts"):
-            result = outreach.find_contacts(company, jd_row["url"])
+            result = outreach.find_contacts(
+                company,
+                jd_row["url"],
+                your_first=user_p.get("first_name") or "",
+                your_last=user_p.get("last_name") or "",
+            )
             st.session_state["contacts_result"] = result
 
         contacts = st.session_state.get("contacts_result")
@@ -334,7 +410,9 @@ elif page == "Outreach":
         contact_title = st.text_input("Contact title", "Recruiter")
 
         if st.button("Generate cold email", type="primary"):
-            if not resume_text:
+            if not GROQ_CONFIGURED:
+                st.error("Add GROQ_API_KEY in Streamlit Secrets first.")
+            elif not resume_text:
                 st.error("No resume found for this job. Generate one first.")
             else:
                 with st.spinner("Drafting cold email..."):
