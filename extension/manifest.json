@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Career Copilot Extractor",
+  "version": "0.1.0",
+  "description": "Sends the open job posting to your personal Career Copilot for resume/cover letter generation.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://www.indeed.com/*",
+    "https://*.indeed.com/*",
+    "https://joinhandshake.com/*",
+    "https://app.joinhandshake.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Career Copilot"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/*",
+        "https://www.indeed.com/*",
+        "https://*.indeed.com/*",
+        "https://joinhandshake.com/*",
+        "https://app.joinhandshake.com/*",
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*"
+      ],
+      "js": ["extractor.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

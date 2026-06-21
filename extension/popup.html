@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 360px; font-family: system-ui, sans-serif; padding: 10px; }
+    textarea { width: 100%; height: 160px; box-sizing: border-box; font-size: 12px; }
+    button { width: 100%; padding: 8px; margin-top: 6px; cursor: pointer; }
+    .small { font-size: 11px; color: #666; }
+    input[type="text"], input[type="password"] { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
+    #status { font-size: 12px; margin-top: 6px; }
+    details { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h3 style="margin:0 0 8px 0;">Career Copilot</h3>
+
+  <button id="extractBtn">Extract job posting from this page</button>
+  <textarea id="jobText" placeholder="Extracted text will appear here, edit if needed before sending"></textarea>
+  <button id="sendBtn">Send to Career Copilot</button>
+  <div id="status"></div>
+
+  <details>
+    <summary class="small">Settings</summary>
+    <label class="small">API URL (where extension_api.py is running)</label>
+    <input type="text" id="apiUrl" placeholder="http://localhost:8765" />
+    <label class="small">API token</label>
+    <input type="password" id="apiToken" placeholder="matches EXTENSION_API_TOKEN" />
+    <button id="saveSettingsBtn">Save settings</button>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>
